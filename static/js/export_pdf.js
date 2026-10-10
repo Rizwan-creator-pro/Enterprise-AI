@@ -37,15 +37,33 @@ function textImg(text, pt, bold) {
     return { url: c.toDataURL('image/png'), w: w * mm, h: h * mm };
 }
 
+function sanitizeForPdf(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/₹\s*/g, 'Rs. ')
+        .replace(/[\u2018\u2019]/g, "'")
+        .replace(/[\u201C\u201D]/g, '"')
+        .replace(/[\u2013\u2014]/g, '-')
+        .replace(/\u2026/g, '...')
+        .replace(/\u00A0/g, ' ')
+        .replace(/[▍▎▏▌]/g, '')
+        .replace(/\*\*/g, '')
+        .replace(/`/g, '');
+}
+
 async function buildPDF({ head, body }, title, summary = '', charts = []) {
     if (!window.jspdf || !window.jspdf.jsPDF) {
         showError('error', 'PDF', 'PDF library failed to load.');
         return null;
     }
     const heading = niceTitle(title);
+    const cleanHead = head.map(h => sanitizeForPdf(h));
+    const cleanBody = body.map(row => row.map(cell => sanitizeForPdf(cell)));
+    const cleanSummary = sanitizeForPdf(summary).trim();
+
     const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     doc.setProperties({ title: heading });
-    const everything = [heading, summary, PDF_COMPANY, ...charts.map(c => c.title), ...head, ...body.flat()].join(' ');
+    const everything = [heading, cleanSummary, PDF_COMPANY, ...charts.map(c => c.title), ...cleanHead, ...cleanBody.flat()].join(' ');
     let AR = 'helvetica';
     if (hasArabic(everything)) {
         const b64 = await ensurePdfFont();
@@ -70,30 +88,39 @@ async function buildPDF({ head, body }, title, summary = '', charts = []) {
     };
 
     const pageW = doc.internal.pageSize.getWidth();
-    const num = i => body.length && body.every(r => (r[i] || '') === '' || !isNaN((r[i] || '').replace(/,/g, '')));
+    const num = i => cleanBody.length && cleanBody.every(r => (r[i] || '') === '' || !isNaN((r[i] || '').replace(/,/g, '')));
     const columnStyles = {};
-    head.forEach((h, i) => { if (num(i)) columnStyles[i] = { halign: 'right' }; });
+    cleanHead.forEach((h, i) => { if (num(i)) columnStyles[i] = { halign: 'right' }; });
 
     let startY = 15;
-    if (summary) {
+    if (cleanSummary) {
+        let y = 19;
         doc.setFontSize(9).setTextColor(0, 139, 139);
-        put('Summary', 10, 19, { bold: true });
+        put('Summary', 10, y, { bold: true });
         doc.setTextColor(40);
-        let y = 24;
-        summary.split('\n').forEach(l => {
-            if (!l.trim()) return;
-            let parts = [l];
-            if (!hasComplex(l)) {
-                doc.setFont(fontFor(l), 'normal');
-                parts = doc.splitTextToSize(l, pageW - 20);
+        y += 4.5;
+        const maxTextW = pageW - 26; // Safe buffer to prevent margin clipping
+        doc.setFontSize(8);
+
+        cleanSummary.split('\n').forEach(l => {
+            const trimmed = l.trim();
+            if (!trimmed) {
+                y += 1.8;
+                return;
+            }
+            const isHeading = /^[A-Z][A-Za-z0-9\s&,–-]{2,40}:?$/.test(trimmed) && !trimmed.startsWith('•') && !trimmed.startsWith('-');
+            let parts = [trimmed];
+            if (!hasComplex(trimmed)) {
+                doc.setFont(fontFor(trimmed), isHeading ? 'bold' : 'normal');
+                parts = doc.splitTextToSize(trimmed, maxTextW);
             }
             parts.forEach(sl => {
                 const rtl = hasArabic(sl);
-                put(sl, rtl ? pageW - 10 : 10, y, { align: rtl ? 'right' : undefined, maxW: pageW - 20 });
+                put(sl, rtl ? pageW - 10 : 10, y, { align: rtl ? 'right' : undefined, bold: isHeading, maxW: maxTextW });
                 y += 3.8;
             });
         });
-        startY = y + 3;
+        startY = y + 3.5;
     }
 
     const TOTAL = '{totalPages}';
@@ -106,15 +133,21 @@ async function buildPDF({ head, body }, title, summary = '', charts = []) {
         doc.setFontSize(8).setFont('helvetica', 'normal').setTextColor(80);
         doc.text(new Date().toLocaleDateString(), r - 28, 10, { align: 'right' });
         doc.text(`Page ${n}/${TOTAL}`, r, 10, { align: 'right' });
-        doc.setDrawColor(0, 128, 191).setLineWidth(0.25).line(10, 13, r, 13);
+
+        // Header line: only display if summary text is present above the table on page 1.
+        // If only the table shows first, the line is not displayed.
+        if (cleanSummary && n === 1) {
+            doc.setDrawColor(0, 128, 191).setLineWidth(0.25).line(10, 13, r, 13);
+        }
+
         doc.setFontSize(7).setFont('helvetica', 'italic').setTextColor(150).text(PDF_CREDIT, cx, h - 5, { align: 'center' });
     };
 
     const pad = 0.8;
     let page = 0;
     doc.autoTable({
-        head: [head],
-        body,
+        head: [cleanHead],
+        body: cleanBody,
         startY,
         columnStyles,
         margin: { top: 15, left: 10, right: 10, bottom: 10 },

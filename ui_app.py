@@ -466,9 +466,31 @@ def get_user_tables(request: Request):
             "schema_hint": ep.get("schema_hint"),
             "row_count": len(rows),
             "columns": cols,
-            "sample": rows[:3] if rows else []
+            "sample": rows[:3] if rows else [],
+            "rows": rows
         })
     return {"tables": tables_list}
+
+@app.get("/api/tables/{endpoint_id}/data")
+def get_table_data(endpoint_id: int, request: Request):
+    u = current_user(request)
+    datasets, endpoints_meta = _get_user_datasets(u["u"])
+    target_meta = next((ep for ep in endpoints_meta if ep.get("endpoint_id") == endpoint_id), None)
+    if not target_meta:
+        raise HTTPException(status_code=404, detail="Table not found or not authorized.")
+    name = str(target_meta.get("endpoint_name", "Data"))
+    rows = datasets.get(name, [])
+    cols = []
+    if rows and isinstance(rows[0], dict):
+        cols = [c for c in rows[0].keys() if c != "links"]
+    return {
+        "name": name,
+        "endpoint_id": endpoint_id,
+        "description": target_meta.get("description"),
+        "columns": cols,
+        "row_count": len(rows),
+        "rows": rows
+    }
 
 @app.post("/api/logout")
 def logout(response: Response):
@@ -1144,5 +1166,7 @@ def transcribe(request: Request, audio: UploadFile = File(...), language: str = 
     raise HTTPException(status_code=502, detail=last)
 
 @app.get("/", response_class=FileResponse)
+@app.get("/ai", response_class=FileResponse)
+@app.get("/ai/", response_class=FileResponse)
 def serve_ui():
     return FileResponse("index.html")

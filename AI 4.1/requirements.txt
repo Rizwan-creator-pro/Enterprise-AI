@@ -1,0 +1,8 @@
+# Python libraries the AI Hub needs. Installed automatically by start_hub.bat
+# (manual install:  python -m pip install -r requirements.txt)
+fastapi>=0.110
+uvicorn>=0.29
+requests>=2.31
+pydantic>=2.5
+python-multipart>=0.0.9   # needed for the voice-recording upload (/api/transcribe)
+python-dotenv>=1.0        # reads secrets from the .env file
