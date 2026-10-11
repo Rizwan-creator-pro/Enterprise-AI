@@ -1,10 +1,37 @@
 // ==============================================================================
-// Dream Enterprise AI Hub - Core Helpers & Library Loader
+// Enterprise AI Hub - Core Helpers & Library Loader
 // ==============================================================================
 
-const FILE_COMPANY = 'Dream';
-const PDF_COMPANY = 'Dream';
-const PDF_CREDIT = 'Software Created By: M. RIZWAN - 03237004270';
+let APP_CONFIG = {
+    company_name: "Enterprise AI",
+    app_name: "Enterprise AI Hub",
+    version: "2.4.0-PRO",
+    version_badge: "PRO",
+    pdf_company: "Enterprise AI",
+    file_prefix: "Enterprise_AI",
+    footer_watermark: "Enterprise AI Hub • Autonomous Intelligence Platform • Confidential",
+    software_creator: "Enterprise AI Engineering Team",
+    contact_info: "support@enterprise.ai"
+};
+
+var FILE_COMPANY = APP_CONFIG.file_prefix;
+var PDF_COMPANY = APP_CONFIG.pdf_company;
+var PDF_CREDIT = APP_CONFIG.footer_watermark;
+
+// Dynamically synchronize branding from /api/config
+(async function syncAppConfig() {
+    try {
+        const res = await fetch('/api/config');
+        if (res.ok) {
+            const data = await res.json();
+            APP_CONFIG = Object.assign(APP_CONFIG, data);
+            FILE_COMPANY = APP_CONFIG.file_prefix || APP_CONFIG.company_name || 'Enterprise_AI';
+            PDF_COMPANY = APP_CONFIG.pdf_company || APP_CONFIG.company_name || 'Enterprise AI';
+            PDF_CREDIT = APP_CONFIG.footer_watermark || 'Enterprise AI Hub • Confidential';
+            window.APP_CONFIG = APP_CONFIG;
+        }
+    } catch (e) {}
+})();
 
 // Heavy export libraries loaded on demand
 const LIBS = {

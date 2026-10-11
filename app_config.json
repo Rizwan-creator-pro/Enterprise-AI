@@ -1,0 +1,14 @@
+{
+  "company_name": "Enterprise AI",
+  "app_name": "Enterprise AI Hub",
+  "version": "2.4.0-PRO",
+  "version_badge": "PRO",
+  "pdf_company": "Enterprise AI",
+  "file_prefix": "Enterprise_AI",
+  "footer_watermark": "Enterprise AI Hub • Autonomous Intelligence Platform • Confidential",
+  "software_creator": "Enterprise AI Engineering Team",
+  "contact_info": "support@enterprise.ai",
+  "system_title": "Enterprise AI Hub System Architecture & Technical Specifications",
+  "doc_subtitle": "Autonomous Agent Specifications, In-Memory Deterministic Sandbox & Oracle ORDS",
+  "greeting_sub": "Ask about enterprise data, run in-memory calculations, or generate verified reports."
+}

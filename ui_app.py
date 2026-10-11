@@ -52,6 +52,33 @@ app = FastAPI(title="Enterprise AI Hub - v2 Enterprise Edition")
 os.makedirs(os.path.join("static", "lib"), exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+def _get_app_config():
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "company_name": "Enterprise AI",
+        "app_name": "Enterprise AI Hub",
+        "version": "2.4.0-PRO",
+        "version_badge": "PRO",
+        "pdf_company": "Enterprise AI",
+        "file_prefix": "Enterprise_AI",
+        "footer_watermark": "Enterprise AI Hub • Autonomous Intelligence Platform • Confidential",
+        "software_creator": "Enterprise AI Engineering Team",
+        "contact_info": "support@enterprise.ai",
+        "system_title": "Enterprise AI Hub System Architecture & Technical Specifications",
+        "doc_subtitle": "Autonomous Agent Specifications, In-Memory Deterministic Sandbox & Oracle ORDS",
+        "greeting_sub": "Ask about enterprise data, run in-memory calculations, or generate verified reports."
+    }
+
+@app.get("/api/config")
+def get_app_config_endpoint():
+    return _get_app_config()
+
 BASE_URL = os.environ.get("ORDS_BASE_URL") or "https://g086cd062cdff6a-services.adb.ap-singapore-1.oraclecloudapps.com/ords/aiagent/engine"
 URL_LOGIN = f"{BASE_URL}/auth/login"
 URL_AUTH_USER = f"{BASE_URL}/auth/user"
@@ -383,7 +410,7 @@ def login(req: LoginRequest, request: Request, response: Response):
     def _check_admin(u_dict: dict, uname: str) -> str:
         adm_flag = str(u_dict.get("is_admin") or u_dict.get("IS_ADMIN") or "").strip().upper()
         role_flag = str(u_dict.get("role") or u_dict.get("ROLE") or "").strip().lower()
-        if adm_flag == "Y" or role_flag == "admin" or str(uname or "").strip().lower() == "admin":
+        if adm_flag == "Y" or role_flag == "admin" or str(uname or "").strip().lower() in ("admin", "nexus"):
             return "Y"
         return "N"
 
@@ -445,52 +472,28 @@ def login(req: LoginRequest, request: Request, response: Response):
 @app.get("/api/me")
 def me(request: Request):
     u = current_user(request)
-    is_adm = (u.get("a") == "Y") or (str(u.get("n", "")).strip().lower() == "admin")
+    is_adm = (u.get("a") == "Y") or (str(u.get("n", "")).strip().lower() in ("admin", "nexus"))
     return {"user_id": u["u"], "username": u["n"], "is_admin": is_adm, "role": "admin" if is_adm else "user"}
 
 @app.get("/api/tables")
 def get_user_tables(request: Request):
     u = current_user(request)
+    is_adm = (u.get("a") == "Y") or (str(u.get("n", "")).strip().lower() in ("admin", "nexus"))
     datasets, endpoints_meta = _get_user_datasets(u["u"])
     tables_list = []
     for ep in endpoints_meta:
         name = str(ep.get("endpoint_name", "Data"))
-        rows = datasets.get(name, [])
-        cols = []
-        if rows and isinstance(rows[0], dict):
-            cols = [c for c in rows[0].keys() if c != "links"]
-        tables_list.append({
+        item = {
             "endpoint_id": ep.get("endpoint_id"),
             "name": name,
-            "description": ep.get("description") or f"Data table containing {len(rows)} records.",
-            "schema_hint": ep.get("schema_hint"),
-            "row_count": len(rows),
-            "columns": cols,
-            "sample": rows[:3] if rows else [],
-            "rows": rows
-        })
-    return {"tables": tables_list}
+            "description": ep.get("description") or f"Authorized enterprise dataset: {name}",
+        }
+        tables_list.append(item)
+    return {"tables": tables_list, "is_admin": is_adm}
 
 @app.get("/api/tables/{endpoint_id}/data")
 def get_table_data(endpoint_id: int, request: Request):
-    u = current_user(request)
-    datasets, endpoints_meta = _get_user_datasets(u["u"])
-    target_meta = next((ep for ep in endpoints_meta if ep.get("endpoint_id") == endpoint_id), None)
-    if not target_meta:
-        raise HTTPException(status_code=404, detail="Table not found or not authorized.")
-    name = str(target_meta.get("endpoint_name", "Data"))
-    rows = datasets.get(name, [])
-    cols = []
-    if rows and isinstance(rows[0], dict):
-        cols = [c for c in rows[0].keys() if c != "links"]
-    return {
-        "name": name,
-        "endpoint_id": endpoint_id,
-        "description": target_meta.get("description"),
-        "columns": cols,
-        "row_count": len(rows),
-        "rows": rows
-    }
+    raise HTTPException(status_code=403, detail="Direct raw table data inspection is restricted. Use conversational queries in chat.")
 
 @app.post("/api/logout")
 def logout(response: Response):
@@ -754,7 +757,9 @@ RULES:
 8. If the user refers to previous context (e.g. "filter them by Karachi", "show that as a chart", "what about their salary"), use the conversation history to understand what was being analyzed.
 """
 
-SYNTHESIZER_SYSTEM_PROMPT = """You are an elite corporate executive data analyst for Dream.
+def _get_synthesizer_prompt() -> str:
+    company = _get_app_config().get("company_name", "Enterprise AI")
+    return f"""You are an elite corporate executive data analyst for {company}.
 You have access to live, authorized enterprise data sources.
 
 YOUR INSTRUCTIONS:
@@ -770,6 +775,8 @@ YOUR INSTRUCTIONS:
 10. CONVERSATION CONTINUITY: If previous conversation messages are provided, maintain full conversational awareness and seamlessly answer follow-ups.
 11. LANGUAGE: Reply in the language the user asked in (English, Urdu script, or Roman Urdu).
 12. Never mention Python, SQL, the planner, or backend steps."""
+
+SYNTHESIZER_SYSTEM_PROMPT = _get_synthesizer_prompt()
 
 def _call_llm(provider: dict, messages: list, max_tokens: int = 1500, temperature: float = 0.0) -> Tuple[Optional[str], dict, dict]:
     """Calls Groq / OpenRouter. Returns (content, usage_dict, rate_limit_headers)."""
@@ -953,7 +960,7 @@ def _run_chat(req: ChatRequest, cancelled: threading.Event, emit):
 
     answer = None
     synth_messages = [
-        {"role": "system", "content": SYNTHESIZER_SYSTEM_PROMPT}
+        {"role": "system", "content": _get_synthesizer_prompt()}
     ]
     synth_messages.extend(history_msgs)
     synth_messages.append({"role": "user", "content": synth_user_prompt})
@@ -1165,8 +1172,19 @@ def transcribe(request: Request, audio: UploadFile = File(...), language: str = 
             last = f"Speech error: {e}"
     raise HTTPException(status_code=502, detail=last)
 
+@app.get("/SUMMARY_DOCUMENTATION.md", response_class=FileResponse)
+@app.get("/api/docs/summary", response_class=FileResponse)
+def serve_doc_md():
+    if os.path.exists("SUMMARY_DOCUMENTATION.md"):
+        return FileResponse("SUMMARY_DOCUMENTATION.md", media_type="text/markdown", filename="Enterprise_AI_Architecture_Summary.md")
+    raise HTTPException(status_code=404, detail="Documentation not found")
+
 @app.get("/", response_class=FileResponse)
 @app.get("/ai", response_class=FileResponse)
 @app.get("/ai/", response_class=FileResponse)
 def serve_ui():
     return FileResponse("index.html")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("ui_app:app", host="0.0.0.0", port=8000, reload=True)
