@@ -483,10 +483,50 @@ def get_user_tables(request: Request):
     tables_list = []
     for ep in endpoints_meta:
         name = str(ep.get("endpoint_name", "Data"))
+        rows = datasets.get(name, [])
+        cols = []
+        col_details = []
+        if rows and isinstance(rows[0], dict):
+            cols = [c for c in rows[0].keys() if c != "links"]
+            for c in cols:
+                t = "VARCHAR2"
+                sample_vals = [r.get(c) for r in rows[:15] if r.get(c) is not None]
+                if sample_vals:
+                    first_val = sample_vals[0]
+                    if isinstance(first_val, (int, float)):
+                        t = "NUMBER"
+                    elif isinstance(first_val, str):
+                        s_val = first_val.strip()
+                        if s_val.replace('.', '', 1).isdigit() or (s_val.startswith(('$', 'PKR', '€', '£')) and s_val[1:].replace(',', '').replace('.', '', 1).isdigit()):
+                            t = "NUMBER"
+                        elif re.search(r'^\d{4}-\d{2}-\d{2}|\d{2}-[A-Za-z]{3}-\d{2,4}', s_val):
+                            t = "DATE"
+                        elif '@' in s_val and '.' in s_val:
+                            t = "EMAIL"
+                
+                c_upper = c.upper()
+                if "ID" in c_upper or "CODE" in c_upper or c_upper == "KEY":
+                    role = "Identifier"
+                elif t == "NUMBER" or any(w in c_upper for w in ("AMOUNT", "SALARY", "PRICE", "QTY", "COUNT", "TOTAL")):
+                    role = "Metric"
+                elif t == "DATE" or "TIME" in c_upper or "DATE" in c_upper:
+                    role = "Temporal"
+                else:
+                    role = "Dimension"
+
+                col_details.append({
+                    "name": c,
+                    "type": t,
+                    "role": role,
+                    "status": "Active"
+                })
+
         item = {
             "endpoint_id": ep.get("endpoint_id"),
             "name": name,
-            "description": ep.get("description") or f"Authorized enterprise dataset: {name}",
+            "description": ep.get("description") or f"Enterprise dataset containing {len(cols)} schema columns.",
+            "column_count": len(cols),
+            "columns": col_details
         }
         tables_list.append(item)
     return {"tables": tables_list, "is_admin": is_adm}
